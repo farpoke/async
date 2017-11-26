@@ -6,13 +6,24 @@
 
 #include <boost/asio.hpp>
 #include <boost/asio/steady_timer.hpp>
+namespace asio = boost::asio;
 
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 
 #include "../include/async.hpp"
 
-namespace asio = boost::asio;
+
+
+class expected_exception : public std::exception {
+    std::string msg;
+public:
+    expected_exception() : msg("") {}
+    expected_exception(std::string_view msg) : msg(msg) {}
+    virtual const char* what() const noexcept override { return msg.c_str(); }
+};
+
+
 
 template<int ThreadCount>
 class AsioFixture
@@ -87,7 +98,7 @@ TEST_CASE("Non-concurrent async::simple_series", "[simple_series]") {
             },
             [&] (auto next) {
                 second_called = true;
-                next(std::make_exception_ptr(std::exception()));
+                next(std::make_exception_ptr(expected_exception()));
             },
             [&] (auto next) {
                 third_called = true;
@@ -104,6 +115,38 @@ TEST_CASE("Non-concurrent async::simple_series", "[simple_series]") {
         CHECK(third_called == false);
         CHECK(last_called == true);
         CHECK(error != nullptr);
+        CHECK_THROWS_AS(std::rethrow_exception(error), expected_exception);
+
+    }
+    
+    SECTION("With exceptions") {
+
+        async::simple_series(
+            [&] (auto next) {
+                first_called = true;
+                next(nullptr);
+            },
+            [&] (auto next) {
+                second_called = true;
+                throw expected_exception("async::simple_series");
+                next(nullptr);
+            },
+            [&] (auto next) {
+                third_called = true;
+                next(nullptr);
+            },
+            [&] (auto err) {
+                last_called = true;
+                error = err;
+            }
+        );
+
+        CHECK(first_called == true);
+        CHECK(second_called == true);
+        CHECK(third_called == false);
+        CHECK(last_called == true);
+        CHECK(error != nullptr);
+        CHECK_THROWS_AS(std::rethrow_exception(error), expected_exception);
 
     }
 
@@ -155,7 +198,7 @@ TEST_CASE("Non-concurrent async::series", "[series]") {
             },
             [&] (async::callback<> next) {
                 second_called = true;
-                next(std::make_exception_ptr(std::exception()));
+                next(std::make_exception_ptr(expected_exception()));
             },
             [&] (async::callback<> next) {
                 third_called = true;
@@ -172,9 +215,40 @@ TEST_CASE("Non-concurrent async::series", "[series]") {
         CHECK(third_called == false);
         CHECK(last_called == true);
         CHECK(error != nullptr);
+        CHECK_THROWS_AS(std::rethrow_exception(error), expected_exception);
 
     }
     
+    SECTION("With exception") {
+
+        async::series(
+            [&] (async::callback<> next) {
+                first_called = true;
+                next(nullptr);
+            },
+            [&] (async::callback<> next) {
+                second_called = true;
+                throw expected_exception("async::series");
+                next(nullptr);
+            },
+            [&] (async::callback<> next) {
+                third_called = true;
+                next(nullptr);
+            },
+            [&] (async::error_type err) {
+                last_called = true;
+                error = err;
+            }
+        );
+
+        CHECK(first_called == true);
+        CHECK(second_called == true);
+        CHECK(third_called == false);
+        CHECK(last_called == true);
+        CHECK(error != nullptr);
+        CHECK_THROWS_AS(std::rethrow_exception(error), expected_exception);
+
+    }
 
     SECTION("With parameters") {
 

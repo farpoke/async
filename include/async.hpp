@@ -38,8 +38,12 @@ namespace async
             first_handler([&] (error_type error) -> void {
                 if (error)
                     last_handler(error);
-                else
-                simple_series(last_handler, rest_handlers...);
+                else try {
+                    simple_series(last_handler, rest_handlers...);
+                }
+                catch (...) {
+                    last_handler(std::current_exception());
+                }
             });
         }
 
@@ -81,15 +85,24 @@ namespace async
         ) {
             using out_tuple_t = typename NextFunctionTraits::argument_tuple;
             auto function = std::get<N>(function_tuple);
-            function(
-                std::get<InArgIs>(in_args)..., 
-                [&](error_type error, std::tuple_element_t<OutArgIs, out_tuple_t>... args) {
-                    if (error)
-                        std::get<sizeof...(Functions)-1>(function_tuple)(error);
-                    else
-                        series<N+1>(function_tuple, std::tuple<std::tuple_element_t<OutArgIs, out_tuple_t>...>{args...});
-                }
-            );
+            auto error_handler = std::get<sizeof...(Functions)-1>(function_tuple);
+            try {
+                function(
+                    std::get<InArgIs>(in_args)..., 
+                    [&](error_type error, std::tuple_element_t<OutArgIs, out_tuple_t>... args) {
+                        if (error)
+                            error_handler(error);
+                        else
+                            series<N+1>(
+                                function_tuple, 
+                                std::tuple<std::tuple_element_t<OutArgIs, out_tuple_t>...>{args...}
+                            );
+                    }
+                );
+            }
+            catch (...) {
+                error_handler(std::current_exception());
+            }
         }
 
         template<
@@ -130,7 +143,12 @@ namespace async
     ) {
         std::tuple<Handlers const& ...> handler_tuple (handlers ...);
         auto& last_handler = std::get<sizeof...(Handlers)-1>(handler_tuple);
-        detail::simple_series(last_handler, handlers...);
+        try {
+            detail::simple_series(last_handler, handlers...);
+        }
+        catch (...) {
+            last_handler(std::current_exception());
+        }
     }
 
     template<typename ... Functions>
