@@ -43,7 +43,7 @@ public:
 
 
 
-TEST_CASE("Non-concurrent async::serial", "[async]") {
+TEST_CASE("Non-concurrent async::simple_series", "[simple_series]") {
 
     bool first_called = false, second_called = false, 
         third_called = false, last_called = false;
@@ -51,7 +51,7 @@ TEST_CASE("Non-concurrent async::serial", "[async]") {
 
     SECTION("No error") {
 
-        async::series(
+        async::simple_series(
             [&] (auto next) {
                 first_called = true;
                 next(nullptr);
@@ -80,7 +80,7 @@ TEST_CASE("Non-concurrent async::serial", "[async]") {
     
     SECTION("With error") {
 
-        async::series(
+        async::simple_series(
             [&] (auto next) {
                 first_called = true;
                 next(nullptr);
@@ -106,13 +106,81 @@ TEST_CASE("Non-concurrent async::serial", "[async]") {
         CHECK(error != nullptr);
 
     }
+
+}
+
+
+
+TEST_CASE("Non-concurrent async::series", "[series]") {
+
+    bool first_called = false, second_called = false, 
+        third_called = false, last_called = false;
+    async::error_type error = nullptr;
+
+    SECTION("No error") {
+
+        async::series(
+            [&] (async::callback<> next) {
+                first_called = true;
+                next(nullptr);
+            },
+            [&] (async::callback<> next) {
+                second_called = true;
+                next(nullptr);
+            },
+            [&] (async::callback<> next) {
+                third_called = true;
+                next(nullptr);
+            },
+            [&] (async::error_type err) {
+                last_called = true;
+                error = err;
+            }
+        );
+
+        CHECK(first_called == true);
+        CHECK(second_called == true);
+        CHECK(third_called == true);
+        CHECK(last_called == true);
+        CHECK(error == nullptr);
+
+    }
+    
+    SECTION("With error") {
+
+        async::series(
+            [&] (async::callback<> next) {
+                first_called = true;
+                next(nullptr);
+            },
+            [&] (async::callback<> next) {
+                second_called = true;
+                next(std::make_exception_ptr(std::exception()));
+            },
+            [&] (async::callback<> next) {
+                third_called = true;
+                next(nullptr);
+            },
+            [&] (async::error_type err) {
+                last_called = true;
+                error = err;
+            }
+        );
+
+        CHECK(first_called == true);
+        CHECK(second_called == true);
+        CHECK(third_called == false);
+        CHECK(last_called == true);
+        CHECK(error != nullptr);
+
+    }
     
 
     SECTION("With parameters") {
 
         int a=0, b=0, c=0;
 
-        async::obj_series(
+        async::series(
             [&] (async::callback<int> next) {
                 first_called = true;
                 next(nullptr, 1);
@@ -145,48 +213,6 @@ TEST_CASE("Non-concurrent async::serial", "[async]") {
         CHECK(c == 3);
 
     }
-
-#if false
-
-    SECTION("With parameters") {
-
-        int a=0, b=0, c=0;
-
-        async::param_series(
-            [&] (auto next) {
-                first_called = true;
-                next(nullptr, 1);
-            },
-            [&] (int x, auto next) {
-                second_called = true;
-                a = x;
-                next(nullptr, 2, 3);
-            },
-            [&] (int x1, int x2, auto next) {
-                third_called = true;
-                b = x1;
-                c = x2;
-                next(nullptr);
-            },
-            [&] (auto err) {
-                last_called = true;
-                error = err;
-            }
-        );
-
-        CHECK(first_called == true);
-        CHECK(second_called == true);
-        CHECK(third_called == true);
-        CHECK(last_called == true);
-        CHECK(error == nullptr);
-
-        CHECK(a == 1);
-        CHECK(b == 2);
-        CHECK(c == 3);
-
-    }
-
-#endif
 
 }
 
