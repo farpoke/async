@@ -142,12 +142,11 @@ namespace async
         Handlers const& ... handlers
     ) {
         std::tuple<Handlers const& ...> handler_tuple (handlers ...);
-        auto& last_handler = std::get<sizeof...(Handlers)-1>(handler_tuple);
         try {
-            detail::simple_series(last_handler, handlers...);
+            detail::simple_series(std::get<sizeof...(Handlers)-1>(handler_tuple), handlers...);
         }
         catch (...) {
-            last_handler(std::current_exception());
+            std::get<sizeof...(Handlers)-1>(handler_tuple)(std::current_exception());
         }
     }
 

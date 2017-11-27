@@ -292,28 +292,47 @@ TEST_CASE("Non-concurrent async::series", "[series]") {
 
 
 
-#if false
-
-TEST_CASE_METHOD(AsioFixture<2>, "async::serial", "[async]") {
+TEST_CASE_METHOD(AsioFixture<2>, "Concurrent async::simple_series", "[simple_series]") {
 
     std::promise<void> promise;
     auto future = promise.get_future();
     bool first_called = false, second_called = false, third_called = false;
 
-    async::series(
-        [&first_called] (async::callback<> next) {
+    async::simple_series(
+        [&] (auto next) {
             first_called = true;
-            next(nullptr);
+            asio::steady_timer timer(ios);
+            timer.expires_from_now(std::chrono::milliseconds(10));
+            timer.async_wait([&](auto ec){
+                if (ec)
+                    next(std::make_exception_ptr(boost::system::system_error(ec)));
+                else
+                    next(nullptr);
+            });
         },
-        [&second_called] (async::callback<> next) {
+        [&] (auto next) {
             second_called = true;
-            next(nullptr);
+            asio::steady_timer timer(ios);
+            timer.expires_from_now(std::chrono::milliseconds(10));
+            timer.async_wait([&](auto ec){
+                if (ec)
+                    next(std::make_exception_ptr(boost::system::system_error(ec)));
+                else
+                    next(nullptr);
+            });
         },
-        /* [&third_called] (async::callback<> next) {
+        [&] (auto next) {
             third_called = true;
-            next(nullptr);
-        }, */
-        [&promise] (async::error_type ec) {
+            asio::steady_timer timer(ios);
+            timer.expires_from_now(std::chrono::milliseconds(10));
+            timer.async_wait([&](auto ec){
+                if (ec)
+                    next(std::make_exception_ptr(boost::system::system_error(ec)));
+                else
+                    next(nullptr);
+            });
+        },
+        [&] (auto ec) {
             promise.set_value();
         }
     );
@@ -325,5 +344,3 @@ TEST_CASE_METHOD(AsioFixture<2>, "async::serial", "[async]") {
     CHECK(third_called);
 
 }
-
-#endif
