@@ -1,17 +1,23 @@
 
 #include <atomic>
 #include <chrono>
-#include <future>
 #include <thread>
 
 #include <boost/asio.hpp>
 #include <boost/asio/steady_timer.hpp>
-namespace asio = boost::asio;
+
+// Use boost's promise and future because the std:: versions currently segfault.
+#define BOOST_THREAD_PROVIDES_FUTURE
+#include <boost/thread/future.hpp>
 
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 
 #include "../include/async.hpp"
+
+
+
+namespace asio = boost::asio;
 
 
 
@@ -31,9 +37,10 @@ class AsioFixture
 public:
     std::atomic_bool stop;
     asio::io_service ios;
+    asio::io_service::work work;
     std::vector<std::thread> threads;
 
-    AsioFixture() {
+    AsioFixture() : ios(), work(ios) {
         INFO("Starting AsioFixture threads...");
         stop = false;
         for (int i = 0; i < ThreadCount; i++)
@@ -56,7 +63,7 @@ public:
 
 TEST_CASE("Non-concurrent async::simple_series", "[simple_series]") {
 
-    bool first_called = false, second_called = false, 
+    bool first_called = false, second_called = false,
         third_called = false, last_called = false;
     async::error_type error = nullptr;
 
@@ -88,7 +95,7 @@ TEST_CASE("Non-concurrent async::simple_series", "[simple_series]") {
         CHECK(error == nullptr);
 
     }
-    
+
     SECTION("With error") {
 
         async::simple_series(
@@ -118,7 +125,7 @@ TEST_CASE("Non-concurrent async::simple_series", "[simple_series]") {
         CHECK_THROWS_AS(std::rethrow_exception(error), expected_exception);
 
     }
-    
+
     SECTION("With exceptions") {
 
         async::simple_series(
@@ -156,7 +163,7 @@ TEST_CASE("Non-concurrent async::simple_series", "[simple_series]") {
 
 TEST_CASE("Non-concurrent async::series", "[series]") {
 
-    bool first_called = false, second_called = false, 
+    bool first_called = false, second_called = false,
         third_called = false, last_called = false;
     async::error_type error = nullptr;
 
@@ -188,7 +195,7 @@ TEST_CASE("Non-concurrent async::series", "[series]") {
         CHECK(error == nullptr);
 
     }
-    
+
     SECTION("With error") {
 
         async::series(
@@ -218,7 +225,7 @@ TEST_CASE("Non-concurrent async::series", "[series]") {
         CHECK_THROWS_AS(std::rethrow_exception(error), expected_exception);
 
     }
-    
+
     SECTION("With exception") {
 
         async::series(
@@ -292,55 +299,63 @@ TEST_CASE("Non-concurrent async::series", "[series]") {
 
 
 
-TEST_CASE_METHOD(AsioFixture<2>, "Concurrent async::simple_series", "[simple_series]") {
+TEST_CASE_METHOD(AsioFixture<1>, "Concurrent async::simple_series", "[simple_series]") {
 
-    std::promise<void> promise;
-    auto future = promise.get_future();
-    bool first_called = false, second_called = false, third_called = false;
+    struct shared_state {
+        boost::promise<void> promise;
+        bool first_called, second_called, third_called;
+        std::exception_ptr error;
+    };
+
+    auto state = std::make_shared<shared_state>();
+    auto future = state->promise.get_future();
+
+    // Keep timer out here since it would be cancelled when going out of scope inside a lambda.
+    auto timer = std::make_shared<asio::steady_timer>(ios);
 
     async::simple_series(
-        [&] (auto next) {
-            first_called = true;
-            asio::steady_timer timer(ios);
-            timer.expires_from_now(std::chrono::milliseconds(10));
-            timer.async_wait([&](auto ec){
+        [=] (auto next) {
+            state->first_called = true;
+            timer->expires_from_now(std::chrono::milliseconds(10));
+            timer->async_wait([&](auto ec){
                 if (ec)
                     next(std::make_exception_ptr(boost::system::system_error(ec)));
                 else
                     next(nullptr);
             });
         },
-        [&] (auto next) {
-            second_called = true;
-            asio::steady_timer timer(ios);
-            timer.expires_from_now(std::chrono::milliseconds(10));
-            timer.async_wait([&](auto ec){
+        [=] (auto next) {
+            state->second_called = true;
+            timer->expires_from_now(std::chrono::milliseconds(10));
+            timer->async_wait([&](auto ec){
                 if (ec)
                     next(std::make_exception_ptr(boost::system::system_error(ec)));
                 else
                     next(nullptr);
             });
         },
-        [&] (auto next) {
-            third_called = true;
-            asio::steady_timer timer(ios);
-            timer.expires_from_now(std::chrono::milliseconds(10));
-            timer.async_wait([&](auto ec){
+        [=] (auto next) {
+            state->third_called = true;
+            timer->expires_from_now(std::chrono::milliseconds(10));
+            timer->async_wait([&](auto ec){
                 if (ec)
                     next(std::make_exception_ptr(boost::system::system_error(ec)));
                 else
                     next(nullptr);
             });
         },
-        [&] (auto ec) {
-            promise.set_value();
+        [=] (auto err) {
+            state->error = err;
+            state->promise.set_value();
         }
     );
 
     future.get();
 
-    CHECK(first_called);
-    CHECK(second_called);
-    CHECK(third_called);
+    CHECK(state->first_called);
+    CHECK(state->second_called);
+    CHECK(state->third_called);
+    CHECK(state->error == nullptr);
+    //CHECK_NOTHROW(std::rethrow_exception(error));
 
 }
